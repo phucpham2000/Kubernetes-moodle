@@ -1,0 +1,145 @@
+#install calico
+kubeadm init --apiserver-advertise-address=192.168.56.100 --pod-network-cidr=192.168.0.0/16
+
+mkdir -p $HOME/.kube
+sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+sudo chown $(id -u):$(id -g) $HOME/.kube/config
+
+
+kubectl apply -f https://docs.projectcalico.org/v3.10/manifests/calico.yaml
+
+
+----
+#Ket noi node vao cluster
+kubeadm token create --print-join-command
+
+
+
+----
+#cai docker
+yum install -y yum-utils device-mapper-persistent-data lvm2
+yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+yum -y install docker-ce
+usermod -aG docker $(whoami)
+
+systemctl enable docker.service
+systemctl start docker.service
+
+# Tat SELinux
+setenforce 0
+sed -i --follow-symlinks 's/^SELINUX=enforcing/SELINUX=disabled/' /etc/sysconfig/selinux
+
+# Tat Firewall
+systemctl disable firewalld >/dev/null 2>&1
+systemctl stop firewalld
+
+# sysctl
+cat >>/etc/sysctl.d/kubernetes.conf<<EOF
+net.bridge.bridge-nf-call-ip6tables = 1
+net.bridge.bridge-nf-call-iptables = 1
+EOF
+sysctl --system >/dev/null 2>&1
+
+# Tat swap
+sed -i '/swap/d' /etc/fstab
+swapoff -a
+
+# Add yum repo file for Kubernetes
+cat >>/etc/yum.repos.d/kubernetes.repo<<EOF
+[kubernetes]
+name=Kubernetes
+baseurl=https://packages.cloud.google.com/yum/repos/kubernetes-el7-x86_64
+enabled=1
+gpgcheck=1
+repo_gpgcheck=1
+gpgkey=https://packages.cloud.google.com/yum/doc/yum-key.gpg https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
+EOF
+
+yum install -y kubeadm kubelet kubectl
+
+systemctl enable kubelet
+systemctl start kubelet
+
+
+#solve unknow service runtime...
+rm /etc/containerd/config.toml
+systemctl restart containerd
+
+
+#kubectl describe nodes
+#error: container runtime network not ready
+~ curl https://docs.projectcalico.org/manifests/calico-typha.yaml -o calico.yaml
+
+kubectl apply -f calico.yaml
+
+
+
+----
+#delete node
+kubectl drain worker1.xtl --ignore-daemonsets --delete-local-data
+
+kubectl delete node worker1.xtl 
+
+#dung port
+kubeadm reset
+
+
+----
+kubeadm join 192.168.56.100:6443 --token w092y3.blyeml9n2xcrwsl1 --discovery-token-ca-cert-hash sha256:6239e0d052ce7a02406eef89d51d367e19d0a4b85b408d14ca4a1c44b329d41d
+
+kubeadm init --apiserver-advertise-address=192.168.56.100 --pod-network-cidr=192.168.0.0/16
+
+
+---------Cluster init
+kubeadm token create --print-join-command
+
+-----
+DASHBOARD
+kubectl apply -f dashboard-v2.5.1.yaml
+
+
+----
+kubectl get secret -n kubernetes-dashboard
+kubectl describe secret kubernetes-dashboard-certs -n kubernetes-dashboard
+kubectl get po -n kubernetes-dashboard
+kubectl get node -o wide
+kubectl delete secret kubernetes-dashboard-certs -n kubernetes-dashboard
+kubectl describe pod -n kubernetes-dashboard ..
+
+kubectl create secret generic kubernetes-dashboard-certs --from-file=certs -n kubernetes-dashboard
+---
+Lay token admin'
+kubectl -n kubernetes-dashboard describe secret $(kubectl -n kubernetes-dashboard get secret | grep admin-user | awk '{print $1}')
+
+
+
+---
+scp root@192.168.56.100:/etc/kubernetes/admin.conf ~/.kube/config-mycluster
+
+
+
+-----
+
+Deploy docker image to Kubernetes
+
+kubectl create -f create-redispod.yml
+kubectl get pods pod/moodle-pod
+kubectl describe pod/moodle-pod
+
+minikube start service: podmoodle-pod
+
+
+---Log
+ kubectl logs etcd-minikube -c etcd -n kube-system --tail 1 --follow 
+
+curl -i -XPOST localhost:9090/-/reload
+
+
+---Init Flannel
+kubeadm token create --print-join-command
+
+sudo kubeadm init --pod-network-cidr=10.244.0.0/24
+
+sudo kubeadm join 192.168.1.242:6443 --token 1733a9.p131hwbbrqjrvjfk --discovery-token-ca-cert-hash sha256:850f271ace09f4f6f7e88132350f3c9deac0b53274abdf83fdf5b3ebce329fb3
+
+export KUBECONFIG=/etckubernetes/admin.conf
